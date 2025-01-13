@@ -148,7 +148,6 @@ blueprint:
           default: false
           selector:
             boolean: {} 
-      input:
         on_double_press_exposed:
           name: Expose virtual double press "on" event
           description: >
