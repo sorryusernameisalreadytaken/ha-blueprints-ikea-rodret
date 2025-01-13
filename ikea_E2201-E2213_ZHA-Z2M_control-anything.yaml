@@ -91,33 +91,21 @@ action:
       trigger_id: "{{ trigger.id }}"
       last_press: "{{ states(last_button_press_helper) }}"
       time_diff: "{{ now().timestamp() - (states(last_press_time_helper) | float) }}"
-      
-  - choose:
-    - conditions:
-        - condition: template
-          value_template: >
-            {{ trigger_id == 'press-on' and 
-               last_press == 'press-off' and 
-               time_diff <= (helper_combination_timeout/1000) }}
-      sequence: !input combined_press_action
-      
-    - conditions:
-        - condition: template
-          value_template: >
-            {{ trigger_id == 'press-off' and 
-               last_press == 'press-on' and 
-               time_diff <= (helper_combination_timeout/1000) }}
-      sequence: !input combined_press_action
-      
-    - conditions:
-        - condition: trigger
-          id: press-on
-      sequence: !input on_press_action
-      
-    - conditions:
-        - condition: trigger
-          id: press-off
-      sequence: !input off_press_action
+  
+  - if:
+      - condition: template
+        value_template: >
+          {{ (trigger_id == 'press-on' and last_press == 'press-off') or
+             (trigger_id == 'press-off' and last_press == 'press-on') }}
+      - condition: template
+        value_template: "{{ time_diff <= (helper_combination_timeout/1000) }}"
+    then: !input combined_press_action
+    else:
+      - if:
+          - condition: trigger
+            id: press-on
+        then: !input on_press_action
+        else: !input off_press_action
   
   - service: input_text.set_value
     target:
