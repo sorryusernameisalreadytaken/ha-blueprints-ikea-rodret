@@ -11,11 +11,13 @@ blueprint:
     Only for use with [ZHA](https://www.home-assistant.io/integrations/zha/)
     or Zigbee2MQTT.
 
+
     Available controls:
     - Single press **on/off** (Rodret) **1 dot/2 dots** (Somrig)
     - Double press **on/off** (Rodret) **1 dot/2 dots** (Somrig)
     - Hold **on/off** (Rodret) **1 dot/2 dots** (Somrig)
     - Combined press **on+off** (Rodret) **1 dot+2 dots** (Somrig)
+
   input:
     remote_device:
       name: Remote
@@ -38,54 +40,56 @@ blueprint:
               manufacturer: IKEA
               model: SOMRIG shortcut button
           multiple: false
+
+    last_button_press_helper:
+      name: Last Button Press Helper
+      description: Helper to store the last pressed button
+      selector:
+        entity:
+          domain: input_text
+
+    last_press_time_helper:
+      name: Last Press Time Helper
+      description: Helper to store the timestamp of the last press
+      selector:
+        entity:
+          domain: input_number
+
     on_press_action:
       name: Press "on / 1 dot" action
       description: Action when on/1 dot is pressed
       default: []
       selector:
         action: {}
+
     off_press_action:
       name: Press "off / 2 dots" action
       description: Action when off/2 dots is pressed
       default: []
       selector:
         action: {}
+
     combined_press_action:
       name: Combined press action
       description: Action when both buttons are pressed together
       default: []
       selector:
         action: {}
+
     on_hold_action:
       name: Hold "on / 1 dot" action
       description: Action when on/1 dot is held
       default: []
       selector:
         action: {}
+
     off_hold_action:
       name: Hold "off / 2 dots" action
       description: Action when off/2 dots is held
       default: []
       selector:
         action: {}
-    combined_hold_action:
-      name: Combined hold action
-      description: Action when both buttons are held together
-      default: []
-      selector:
-        action: {}
-    on_double_press_action:
-      name: Double press "on / 1 dot" action
-      description: Action when on/1 dot is double pressed
-      default: []
-      selector:
-        action: {}
-    off_double_press_action:
-      name: Double press "off / 2 dots" action
-      description: Action when off/2 dots is double pressed
-      default: []
-      selector:
-        action: {}
+
     helper_section:
       name: Helpers
       icon: mdi:cog-outline
@@ -102,6 +106,7 @@ blueprint:
               max: 5000.0
               step: 10.0
               mode: slider
+
         helper_max_loops:
           name: Max number of loops
           description: Maximum number of loops for hold actions
@@ -112,6 +117,7 @@ blueprint:
               max: 1000.0
               step: 1.0
               mode: slider
+
         helper_combination_timeout:
           name: Combination timeout
           description: Maximum time between button presses for combination actions
@@ -124,61 +130,101 @@ blueprint:
               step: 50.0
               mode: slider
 
-input:
-    last_button_press_helper:
-      name: Last Button Press Helper
-      description: Helper to store the last pressed button
-      selector:
-        entity:
-          domain: input_text
-    last_press_time_helper:
-      name: Last Press Time Helper
-      description: Helper to store the timestamp of the last press
-      selector:
-        entity:
-          domain: input_number
+mode: single
+max_exceeded: silent
 
 trigger:
-  # Original triggers remain the same
-  # Add new triggers for combination detection
+  # RODRET - E2201
   - platform: event
-    event_type: button_combination
+    event_type: zha_event
     event_data:
       device_id: !input remote_device
-      combination: "on_off"
+      command: "on"
+      cluster_id: 6
+      endpoint_id: 1
+    id: press-on-zha-e2201
+
+  - platform: event
+    event_type: zha_event
+    event_data:
+      device_id: !input remote_device
+      command: "off"
+      cluster_id: 6
+      endpoint_id: 1
+    id: press-off-zha-e2201
+
+  # SOMRIG - E2213
+  - platform: event
+    event_type: zha_event
+    event_data:
+      device_id: !input remote_device
+      command: "short_release"
+      endpoint_id: 1
+    id: press-dots1-zha-e2213
+
+  - platform: event
+    event_type: zha_event
+    event_data:
+      device_id: !input remote_device
+      command: "short_release"
+      endpoint_id: 2
+    id: press-dots2-zha-e2213
 
 action:
   - choose:
-      # Original single button actions
+      # Single button actions
       - conditions:
           - condition: trigger
-            id: press-on
-        sequence: !input on_press_action
-      
+            id: 
+              - press-on-zha-e2201
+              - press-dots1-zha-e2213
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {% set time_diff = now().timestamp() - (states(last_press_time_helper) | float) %}
+                      {% set last_button = states(last_button_press_helper) %}
+                      {{ time_diff <= (helper_combination_timeout/1000) and
+                         last_button in ['press-off-zha-e2201', 'press-dots2-zha-e2213'] }}
+                sequence: !input combined_press_action
+            default:
+              - sequence: !input on_press_action
+              - service: input_text.set_value
+                target:
+                  entity_id: !input last_button_press_helper
+                data:
+                  value: "{{ trigger.id }}"
+              - service: input_number.set_value
+                target:
+                  entity_id: !input last_press_time_helper
+                data:
+                  value: "{{ now().timestamp() }}"
+
       - conditions:
           - condition: trigger
-            id: press-off
-        sequence: !input off_press_action
-      
-      # New combination actions
-      - conditions:
-          - condition: template
-            value_template: >
-              {% set time_diff = now().timestamp() - states(last_press_time_helper) | float %}
-              {{ time_diff <= (helper_combination_timeout/1000) and
-                 ((trigger.id == 'press-on' and states(last_button_press_helper) == 'off') or
-                  (trigger.id == 'press-off' and states(last_button_press_helper) == 'on')) }}
-        sequence: !input combined_press_action
-      
-      # Update last button press info
-      default:
-        - service: input_text.set_value
-          target:
-            entity_id: !input last_button_press_helper
-          data:
-            value: "{{ trigger.id }}"
-        - service: input_number.set_value
-          target:
-            entity_id: !input last_press_time_helper
-          data:
-            value: "{{ now().timestamp() }}"
+            id: 
+              - press-off-zha-e2201
+              - press-dots2-zha-e2213
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {% set time_diff = now().timestamp() - (states(last_press_time_helper) | float) %}
+                      {% set last_button = states(last_button_press_helper) %}
+                      {{ time_diff <= (helper_combination_timeout/1000) and
+                         last_button in ['press-on-zha-e2201', 'press-dots1-zha-e2213'] }}
+                sequence: !input combined_press_action
+            default:
+              - sequence: !input off_press_action
+              - service: input_text.set_value
+                target:
+                  entity_id: !input last_button_press_helper
+                data:
+                  value: "{{ trigger.id }}"
+              - service: input_number.set_value
+                target:
+                  entity_id: !input last_press_time_helper
+                data:
+                  value: "{{ now().timestamp() }}"
