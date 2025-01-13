@@ -64,9 +64,6 @@ blueprint:
           max: 1000.0
           unit_of_measurement: milliseconds
 
-mode: single
-max_exceeded: silent
-
 trigger:
   - platform: event
     event_type: zha_event
@@ -86,19 +83,21 @@ trigger:
       endpoint_id: 1
     id: press-off
 
+variables:
+  trigger_id: "{{ trigger.id }}"
+  last_press: "{{ states(last_button_press_helper) }}"
+  time_diff: "{{ now().timestamp() - (states(last_press_time_helper) | float) }}"
+  is_combination: >
+    {{ (trigger_id == 'press-on' and last_press == 'press-off') or
+       (trigger_id == 'press-off' and last_press == 'press-on') }}
+  is_within_timeout: "{{ time_diff <= (helper_combination_timeout/1000) }}"
+
+condition: []
+
 action:
-  - variables:
-      trigger_id: "{{ trigger.id }}"
-      last_press: "{{ states(last_button_press_helper) }}"
-      time_diff: "{{ now().timestamp() - (states(last_press_time_helper) | float) }}"
-  
   - if:
       - condition: template
-        value_template: >
-          {{ (trigger_id == 'press-on' and last_press == 'press-off') or
-             (trigger_id == 'press-off' and last_press == 'press-on') }}
-      - condition: template
-        value_template: "{{ time_diff <= (helper_combination_timeout/1000) }}"
+        value_template: "{{ is_combination and is_within_timeout }}"
     then: !input combined_press_action
     else:
       - if:
@@ -118,3 +117,6 @@ action:
       entity_id: !input last_press_time_helper
     data:
       value: "{{ now().timestamp() }}"
+
+mode: single
+max_exceeded: silent
